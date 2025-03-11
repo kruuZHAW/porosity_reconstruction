@@ -14,6 +14,7 @@ ipykernel = "^6.29.5"
 seaborn = "^0.13.2"
 torch = "^2.6.0"
 lightning = "^2.5.0.post0"
+scikit-learn = "^1.6.1"
 
 
 [build-system]
