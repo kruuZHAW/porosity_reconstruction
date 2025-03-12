@@ -1,66 +1,83 @@
+import os
+import sys
+current_dir = os.getcwd()
+parent_dir = os.path.abspath(os.path.join(current_dir, ".."))
+sys.path.append(parent_dir)
+
+from utils.poreDataset import PoreDataset
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import pytorch_lightning as pl
-from torch.utils.data import DataLoader, Dataset
 import numpy as np
 
-class PoreDataset(Dataset):
-    def __init__(self, npy_files):
-        self.npy_files = npy_files 
-
-    def __len__(self):
-        return len(self.npy_files)
-
-    def __getitem__(self, idx):
-        file_path = self.npy_files[idx]
-        data = np.load(file_path) 
-
-        occupancy = data[:,3]
-        grid = occupancy.reshape((30, 30, 30))
-        
-        # Extract density from filename
-        density_factor = float(file_path.split("_")[-1].replace(".npy", ""))
-        
-        # Convert to tensors
-        grid_tensor = torch.tensor(grid, dtype=torch.float32).unsqueeze(0)  # Shape (1,30,30,30)
-        density_tensor = torch.tensor([density_factor], dtype=torch.float32)
-
-        return grid_tensor, density_tensor
-
 class VAE(pl.LightningModule):
-    def __init__(self, latent_dim=128, lr = 0.001, beta=0):
+    def __init__(self, latent_dim=128, lr = 0.001, beta=1, alpha=0, gamma=0):
         super(VAE, self).__init__()
         self.latent_dim = latent_dim
         self.lr = lr
-        self.beta = beta
+        self.beta = beta # KL regularization
+        self.alpha = alpha # Number of ones regularization
+        self.gamma = gamma # L1 Regularisation for sparsity
 
         # Encoder (3D Convolutional layers)
         self.encoder = nn.Sequential(
             nn.Conv3d(1, 32, kernel_size=3, stride=2, padding=1),  # (15x15x15)
+            nn.BatchNorm3d(32),
             nn.ReLU(),
-            nn.Conv3d(32, 64, kernel_size=3, stride=2, padding=1),  # (8x8x8)
+            nn.Conv3d(32, 64, kernel_size=3, stride=1, padding=1),  # Keep (15x15x15)
+            nn.BatchNorm3d(64),
             nn.ReLU(),
-            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1),  # (4x4x4)
+            nn.Conv3d(64, 128, kernel_size=3, stride=2, padding=1),  # (8x8x8)
+            nn.BatchNorm3d(128),
+            nn.ReLU(),
+            nn.Conv3d(128, 256, kernel_size=3, stride=2, padding=1),  # (4x4x4)
+            nn.BatchNorm3d(256),
             nn.ReLU(),
             nn.Flatten()
         )
         
         # Latent Space
-        self.fc_mu = nn.Linear(128 * 4 * 4 * 4, latent_dim)
-        self.fc_logvar = nn.Linear(128 * 4 * 4 * 4, latent_dim)
-        
-        # Decoder (Deconvolution)
-        self.decoder_input = nn.Linear(latent_dim + 1, 128 * 4 * 4 * 4)  # Include density factor
+        self.fc_mu = nn.Linear(256 * 4 * 4 * 4, latent_dim)
+        self.fc_logvar = nn.Linear(256 * 4 * 4 * 4, latent_dim)
+
+        # Decoder Input Layer
+        self.decoder_input = nn.Linear(latent_dim + 1, 256 * 4 * 4 * 4)  # Includes density factor
+        # self.decoder_input = nn.Linear(latent_dim, 256 * 4 * 4 * 4)
+
+        # Upsampling + Conv3D Decoder
         self.decoder = nn.Sequential(
-            nn.ConvTranspose3d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True),  # (4 → 8)
+            nn.Conv3d(256, 128, kernel_size=3, padding=1),
+            nn.BatchNorm3d(128),
             nn.ReLU(),
-            nn.ConvTranspose3d(64, 32, kernel_size=3, stride=2, padding=1, output_padding=1),
+
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True),  # (8 → 16)
+            nn.Conv3d(128, 64, kernel_size=3, padding=1),
+            nn.BatchNorm3d(64),
             nn.ReLU(),
-            nn.ConvTranspose3d(32, 1, kernel_size=3, stride=2, padding=1, output_padding=1),
-            nn.Sigmoid()
+
+            nn.Upsample(scale_factor=(15/8, 15/8, 15/8), mode='trilinear', align_corners=True),  # (16 → 15)
+            nn.Conv3d(64, 32, kernel_size=3, padding=1),
+            nn.BatchNorm3d(32),
+            nn.ReLU(),
+
+            nn.Upsample(scale_factor=1, mode='trilinear', align_corners=True),  # (15 → 30)
+            nn.Conv3d(32, 1, kernel_size=3, padding=1),
+            nn.Sigmoid()  # Ensures output is in range (0,1) for occupancy prediction
         )
+
+        
+        # Xavier initialization for weights
+        def weights_init(m):
+            if isinstance(m, nn.Conv3d) or isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+        self.apply(weights_init)
     
     def encode(self, x):
         x = self.encoder(x)
@@ -69,16 +86,14 @@ class VAE(pl.LightningModule):
 
     def reparameterize(self, mu, logvar):
         std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
+        eps = torch.randn_like(std) # Sample from a standard NN
         return mu + eps * std
 
     def decode(self, z, density_factor):
         z = torch.cat([z, density_factor], dim=1)  # Concatenate density factor
         x = self.decoder_input(z)
-        x = x.view(-1, 128, 4, 4, 4)
+        x = x.view(-1, 256, 4, 4, 4)
         x = self.decoder(x)
-        # x = F.interpolate(x, size=(30, 30, 30), mode='trilinear', align_corners=False) #reshape output matrix
-        x = x[:, :, :30, :30, :30]
         return x
 
     def forward(self, x, density_factor):
@@ -86,95 +101,39 @@ class VAE(pl.LightningModule):
         z = self.reparameterize(mu, logvar)
         recon_x = self.decode(z, density_factor)
         return recon_x, mu, logvar
-
-    def loss_function(self, recon_x, x, mu, logvar, density, beta, eps=1e-8):
-        """
-        Custom loss function ensuring exactly `k` ones in the reconstructed grid.
-
-        Parameters:
-        - recon_x: Predicted probabilities from the decoder (before thresholding). Shape: (batch_size, 1, 30, 30, 30)
-        - x: True binary grid.
-        - mu, logvar: Latent space parameters for KL divergence.
-        - density: Batch of target densities. Shape: (batch_size,)
-        - beta: KL divergence weight.
-
-        Returns:
-        - Total loss, reconstruction loss, KL loss.
-        """
-        batch_size = density.shape[0]  # Get batch size
-
-        # Compute k for each batch element using tensor operations
-        k_values = ((density / 0.0882) ** (1 / 0.2632)).long()
-
-        # Flatten the grid for sorting (batch-wise)
-        recon_x_flat = recon_x.reshape(batch_size, -1)  # Shape: (batch_size, 30*30*30)
-        x_flat = x.reshape(batch_size, -1)  # Shape: (batch_size, 30*30*30)
-
-        # Initialize loss
-        total_topk_loss = 0
-
-        # Process each batch sample independently
-        for i in range(batch_size):
-            k_i = k_values[i].item()  # Extract k for this sample
-            if k_i > 0:  # Only apply if at least one '1' is expected
-                _, topk_indices = torch.topk(recon_x_flat[i], k_i)  # Top-k highest probabilities
-                
-                # Create a mask for the k highest values
-                mask = torch.zeros_like(recon_x_flat[i])
-                mask.scatter_(0, topk_indices, 1)  # Set the k highest indices to 1
-                
-                # Prevent log(0) errors using clamping
-                if mask.sum() > 0:  # Avoid division by zero
-                    bce_loss = torch.nn.functional.binary_cross_entropy(
-                        torch.clamp(recon_x_flat[i] * mask, eps, 1 - eps),  # Avoid NaN values
-                        x_flat[i]*mask,
-                        reduction='sum'
-                    )
-                    total_topk_loss += bce_loss
-
-        # Average loss across batch
-        total_topk_loss /= batch_size
-
-        # Prevent KL collapse by using beta warm-up
-        kl_weight = min(0.01, self.current_epoch / 100)
-        kl_loss = kl_weight * (-0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()))
-
-        # Total loss
-        loss = total_topk_loss + beta * kl_loss
-        return loss, total_topk_loss, kl_loss
     
-    # def loss_function(self, recon_x, x, mu, logvar, beta, weight_one=5.0):
-    #     """
-    #     Custom loss function that emphasizes the reconstruction of ones.
-        
-    #     Parameters:
-    #     - recon_x: Predicted grid (output of decoder).
-    #     - x: True grid (ground truth).
-    #     - mu, logvar: Latent space variables for KL divergence.
-    #     - beta: KL divergence weight (default: 0.001).
-    #     - weight_one: Weight factor for ones (default: 5.0).
-        
-    #     Returns:
-    #     - Total loss, reconstruction loss, KL loss.
-    #     """
-    #     # Compute weighted Binary Cross-Entropy Loss
-    #     weight_zero = 1.0  # Keep weight for zeros normal
-    #     weights = torch.where(x == 1, weight_one, weight_zero)  # Apply higher weight to ones
-    #     recon_loss = nn.functional.binary_cross_entropy(recon_x, x, weight=weights, reduction='sum')
+    def loss_function(self, recon_grid, grid, mu, logvar, beta):
+        # Reconstruction loss
+        criterion = nn.BCELoss(reduction='mean') 
+        # criterion = nn.MSELoss(reduction = 'mean')
+        reco_loss = criterion(recon_grid, grid)
 
-    #     # KL Divergence Loss
-    #     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+        # Number of ones loss (MSE instead of squared error difference)
+        ones_diff = ((recon_grid.mean() - grid.mean()) ** 2) * self.alpha 
+        ones_diff /= mu.shape[0] # normalise
 
-    #     # Total loss (Reconstruction + KL regularization)
-    #     loss = recon_loss + beta * kl_loss
-    #     return loss, recon_loss, kl_loss
+        # L1 Sparsity Regularization (penalizes large activations)
+        l1_reg = torch.norm(recon_grid, p=1) * self.gamma 
+        l1_reg /= mu.shape[0]
+
+        # KL Divergence Loss
+        # kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) * beta
+        kl_loss = torch.mean(-0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(),dim=1),dim=0)
+
+        # Total Loss
+        loss = reco_loss + kl_loss + ones_diff + l1_reg
+        return loss, reco_loss, kl_loss
+
 
 
     def training_step(self, batch, batch_idx):
         x, density_factor = batch
         recon_x, mu, logvar = self.forward(x, density_factor)
-        loss, recon_loss, kl_loss = self.loss_function(recon_x, x, mu, logvar, density_factor, self.beta)
-        # loss, recon_loss, kl_loss = self.loss_function(recon_x, x, mu, logvar, self.beta)
+
+        # Gradually increase beta (KL loss weight)
+        beta = min(self.beta, self.current_epoch / 10.0)
+        loss, recon_loss, kl_loss = self.loss_function(recon_x, x, mu, logvar, beta)
+        
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
         self.log("reconstruction_loss", recon_loss)
         self.log("kl_divergence", kl_loss)
@@ -183,8 +142,11 @@ class VAE(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, density_factor = batch
         recon_x, mu, logvar = self.forward(x, density_factor)
-        loss, recon_loss, kl_loss = self.loss_function(recon_x, x, mu, logvar, density_factor, self.beta)
-        # loss, recon_loss, kl_loss = self.loss_function(recon_x, x, mu, logvar, self.beta)
+        
+        # Gradually increase beta (KL loss weight)
+        beta = min(self.beta, self.current_epoch / 10.0)
+        loss, recon_loss, kl_loss = self.loss_function(recon_x, x, mu, logvar, beta)
+        
         self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val_reconstruction_loss", recon_loss)
         self.log("val_kl_divergence", kl_loss)
