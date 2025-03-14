@@ -19,7 +19,7 @@ def load_pore_matrices(file_paths: list[str]):
     density_dict = {}
 
     for i, file in enumerate(file_paths):
-        _, index, density = file.split("\\")[-1].replace(".npy", "").split("_")
+        _, index, density = file.split("/")[-1].replace(".npy", "").split("_")
         data = np.load(file)
         occupancy = data[:, 3]
         pore_matrix = occupancy.reshape((30, 30, 30))

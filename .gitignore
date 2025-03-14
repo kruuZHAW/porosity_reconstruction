@@ -9,6 +9,9 @@ __pycache__/
 # Data
 *.npy
 
+#Lightning logs
+lightning_logs/
+
 # Distribution / packaging
 .Python
 build/
