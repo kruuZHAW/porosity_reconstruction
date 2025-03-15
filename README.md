@@ -44,5 +44,7 @@ Data exploration and its corresponding plots can be reproduced when running the 
 
 The training of the Conditional Variational Autoencoder as well as the display of its results can be reproduced when running the notebook ***notebooks/01_vae_training.ipynb***. When training, the logs will be sotred in a directory called **lightning_logs** located in the parent directory.
 
+The assigment and the final report can be found in the ***report*** directory.
+
 
 
