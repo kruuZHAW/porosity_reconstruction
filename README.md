@@ -41,7 +41,7 @@ The trainings of the models were conduted on a Intel(R) Core(TM) i9-9880H CPU @ 
 ## Structure of the Repository
 
 - ***models***: contains the script building the models classes.
-- ***utils***: contains scripts usefull for data processing, data visualisation, and building a Pytorch DataLoader.
+- ***utils***: contains scripts for data processing, data visualisation, and building a Pytorch DataLoader.
 - ***notebooks***: contains notebooks for data exploration, model training, and plots reproduction.
 - ***reports***: contains the pdfs for the assignement and the final report.
 
