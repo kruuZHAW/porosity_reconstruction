@@ -32,11 +32,11 @@ All dependecies are explicitely listed in the file **pyproject.toml**.
 
 **Data Storage**
 
-Data should be stored in a **data** folder in the main directory.
+Data should be stored in a **data** folder located in the main directory.
 
 **Computer Setup**
 
-The trainings of the models were conduted on a Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz with 32GB of RAM and a NVIDIA Quadro T2000 GPU. The training of the model takes less than *15 minutes*, and once trained, the inference time for the full dataset takes *3 seconds*. Due their size, the trained weights cannot be shared in this repository.
+The trainings of the models were conduted on a Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz with 32GB of RAM and a NVIDIA Quadro T2000 GPU. The training of the model takes less than *15 minutes*, and once trained, the inference time for the full dataset takes *3 seconds*. Due to their size, the trained weights cannot be shared in this repository.
 
 ## Running Instructions
 
