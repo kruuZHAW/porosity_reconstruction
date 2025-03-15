@@ -38,13 +38,18 @@ Data should be stored in a **data** folder located in the main directory.
 
 The trainings of the models were conduted on a Intel(R) Core(TM) i9-9880H CPU @ 2.30GHz with 32GB of RAM and a NVIDIA Quadro T2000 GPU. The training of the model takes less than *15 minutes*, and once trained, the inference time for the full dataset takes *3 seconds*. Due to their size, the trained weights cannot be shared in this repository.
 
+## Structure of the Repository
+
+- ***models***: contains the script building the models classes.
+- ***utils***: contains scripts usefull for data processing, data visualisation, and building a Pytorch DataLoader.
+- ***notebooks***: contains notebooks for data exploration, model training, and plots reproduction.
+- ***reports***: contains the pdfs for the assignement and the final report.
+
 ## Running Instructions
 
 Data exploration and its corresponding plots can be reproduced when running the notebook ***notebooks/00_exploration.ipynb***
 
 The training of the Conditional Variational Autoencoder as well as the display of its results can be reproduced when running the notebook ***notebooks/01_vae_training.ipynb***. When training, the logs will be sotred in a directory called **lightning_logs** located in the parent directory.
-
-The assigment and the final report can be found in the ***report*** directory.
 
 
 
