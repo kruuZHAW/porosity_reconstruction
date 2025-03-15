@@ -1,7 +1,7 @@
 # porosity_reconstruction
 The objective of this assignment is to develop an efficient and robust method or algorithm to reconstruct the distribution of pores within a three-dimensional space, based on a given density factor.
 
-The dataset provides numerical representations of pore sizes and their spatial distribution within a unit cube (ranging from 0 to 1 in all dimensions). Each simulation instance is associated with a density factor between 0 and 1, indicating the proportion of the volume occupied by spherical pores. Higher values correspond to greater pore occupancy. Each input file contains a NumPy array representing a flattened 3D grid with a resolution of 30 grid points per axis. The data structure consists of rows, where each row includes four values: the x, y, and z coordinates, along with an occupancy flag (0 or 1) indicating whether the corresponding point is inside a pore.
+The dataset provides numerical representations of pore sizes and their spatial distribution within a unit cube (ranging from 0 to 1 in all dimensions). Each simulation instance is associated with a density factor between 0 and 1, indicating the proportion of the volume occupied by spherical pores. Higher values correspond to greater pore occupancy. Each input file contains a NumPy array representing a flattened 3D grid with a resolution of 30 grid points per axis. The data structure consists of rows, where each row includes four values: the x, y, and z coordinates, along with an occupancy flag (0 or 1) indicating whether the corresponding point is inside a pore.
 
 Evaluation Criteria: 
 - Accuracy of pore reconstruction
